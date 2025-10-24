@@ -293,7 +293,7 @@ function App() {
   // Function to format updated players back to input format (without memo)
   const formatUpdatedPlayerList = (updatedPlayers) => {
     return updatedPlayers
-      .map(player => `${player.id},${player.name}(${player.bracket}),${player.rating}`)
+      .map(player => `${player.id}\t${player.name}(${player.bracket})\t${player.rating}`)
       .join('\n')
   }
 
