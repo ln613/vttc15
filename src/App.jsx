@@ -30,6 +30,13 @@ function App() {
   const [fullCalculationLog, setFullCalculationLog] = useState('')
   const [selectedPlayer, setSelectedPlayer] = useState('all')
   const [playerNames, setPlayerNames] = useState([])
+  const [isSaving, setIsSaving] = useState(false)
+  const [lastSavedId, setLastSavedId] = useState(null)
+  const [currentPage, setCurrentPage] = useState('calculator') // 'calculator' or 'history'
+  const [historyLogs, setHistoryLogs] = useState([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [historyPlayerFilter, setHistoryPlayerFilter] = useState('all')
+  const [allHistoryPlayers, setAllHistoryPlayers] = useState([])
 
 
   // Function to parse a single match result line
@@ -434,10 +441,107 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  // Function to save log to MongoDB
+  const saveLogToDatabase = async () => {
+    if (!fullCalculationLog) {
+      alert('No log data to save')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const response = await fetch('/.netlify/functions/save-log', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          logData: fullCalculationLog,
+          timestamp: new Date().toISOString(),
+          playerCount: playerNames.length,
+          matchCount: fullCalculationLog.split('Match:').length - 1,
+          selectedPlayer: selectedPlayer
+        }),
+      })
+
+      const result = await response.json()
+      
+      if (response.ok) {
+        setLastSavedId(result.id)
+        alert(`Log saved successfully! ID: ${result.id}`)
+      } else {
+        throw new Error(result.error || 'Failed to save log')
+      }
+    } catch (error) {
+      console.error('Error saving log:', error)
+      alert(`Failed to save log: ${error.message}`)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Function to fetch history logs from database
+  const fetchHistoryLogs = async () => {
+    setIsLoadingHistory(true)
+    try {
+      const response = await fetch('/.netlify/functions/get-logs')
+      const result = await response.json()
+      
+      if (response.ok) {
+        setHistoryLogs(result.logs)
+        
+        // Extract all unique player names from all logs
+        const allPlayers = new Set()
+        result.logs.forEach(log => {
+          const lines = log.logData.split('\n')
+          lines.forEach(line => {
+            const playerMatch = line.match(/<span class="player-name">([^<]+)<\/span>/)
+            if (playerMatch) {
+              allPlayers.add(playerMatch[1])
+            }
+          })
+        })
+        setAllHistoryPlayers(Array.from(allPlayers).sort())
+      } else {
+        throw new Error(result.error || 'Failed to fetch logs')
+      }
+    } catch (error) {
+      console.error('Error fetching history:', error)
+      alert(`Failed to fetch history: ${error.message}`)
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }
+
+  // Function to navigate to history page
+  const goToHistory = () => {
+    setCurrentPage('history')
+    fetchHistoryLogs()
+  }
+
+  // Function to navigate back to calculator
+  const goToCalculator = () => {
+    setCurrentPage('calculator')
+  }
+
   // Function to handle player filter change
   const handlePlayerFilterChange = (playerName) => {
     setSelectedPlayer(playerName)
     setCalculationLog(filterLogByPlayer(fullCalculationLog, playerName))
+  }
+
+  // Function to handle history player filter change
+  const handleHistoryPlayerFilterChange = (playerName) => {
+    setHistoryPlayerFilter(playerName)
+  }
+
+  // Function to filter history logs by player
+  const getFilteredHistoryLogs = () => {
+    if (historyPlayerFilter === 'all') return historyLogs
+    
+    return historyLogs.filter(log => {
+      return log.logData.includes(`<span class="player-name">${historyPlayerFilter}</span>`)
+    })
   }
 
   const handleCalculate = () => {
@@ -511,90 +615,164 @@ function App() {
     setCalculationLog(filterLogByPlayer(fullLog, selectedPlayer))
   }
 
+  // Render calculator page
+  const renderCalculatorPage = () => (
+    <div className="form-section">
+      <div className="input-group">
+        <label htmlFor="result">Result:</label>
+        <textarea
+          id="result"
+          value={result}
+          onChange={(e) => setResult(e.target.value)}
+          placeholder="Result will appear here..."
+          rows={20}
+        />
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="playerList">Player List:</label>
+        <textarea
+          id="playerList"
+          value={playerList}
+          onChange={(e) => setPlayerList(e.target.value)}
+          placeholder="Enter player list..."
+          rows={20}
+        />
+      </div>
+
+      <div className="button-row">
+        <button onClick={handleCalculate} className="calculate-btn">
+          Calculate
+        </button>
+        <button onClick={goToHistory} className="history-btn">
+          📊 History
+        </button>
+      </div>
+
+      {updatedPlayerList && (
+        <div className="output-section">
+          <div className="output-header">
+            <label>Updated Player List:</label>
+            <button
+              onClick={() => copyToClipboard(updatedPlayerList)}
+              className="copy-btn"
+              title="Copy to clipboard"
+            >
+              📋 Copy
+            </button>
+          </div>
+          <textarea
+            value={updatedPlayerList}
+            readOnly
+            rows={20}
+            className="output-textarea"
+          />
+        </div>
+      )}
+
+      {calculationLog && (
+        <div className="output-section">
+          <div className="output-header">
+            <label>Calculation Log:</label>
+            <div className="log-controls">
+              <select
+                value={selectedPlayer}
+                onChange={(e) => handlePlayerFilterChange(e.target.value)}
+                className="player-filter-dropdown"
+              >
+                <option value="all">All Players</option>
+                {playerNames.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <button
+                onClick={saveLogToFile}
+                className="save-btn"
+                title="Save log to file"
+              >
+                💾 Save File
+              </button>
+              <button
+                onClick={saveLogToDatabase}
+                className="save-db-btn"
+                disabled={isSaving}
+                title="Save log to database"
+              >
+                {isSaving ? '⏳ Saving...' : '🗄️ Save to DB'}
+              </button>
+            </div>
+          </div>
+          <div
+            className="log-display"
+            dangerouslySetInnerHTML={{ __html: calculationLog.replace(/\n/g, '<br>') }}
+          />
+        </div>
+      )}
+    </div>
+  )
+
+  // Render history page
+  const renderHistoryPage = () => (
+    <div className="history-section">
+      <div className="history-header">
+        <button onClick={goToCalculator} className="back-btn">
+          ← Back to Calculator
+        </button>
+        <h2>Tournament History</h2>
+        <div className="history-controls">
+          <select
+            value={historyPlayerFilter}
+            onChange={(e) => handleHistoryPlayerFilterChange(e.target.value)}
+            className="player-filter-dropdown"
+          >
+            <option value="all">All Players</option>
+            {allHistoryPlayers.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {isLoadingHistory ? (
+        <div className="loading">Loading history...</div>
+      ) : (
+        <div className="history-logs">
+          {getFilteredHistoryLogs().map((log, index) => (
+            <div key={log.id} className="history-log-item">
+              <div className="log-header">
+                <h3>Tournament #{historyLogs.length - index}</h3>
+                <div className="log-meta">
+                  <span>Date: {new Date(log.timestamp).toLocaleString()}</span>
+                  <span>Players: {log.playerCount}</span>
+                  <span>Matches: {log.matchCount}</span>
+                </div>
+              </div>
+              <div className="output-section">
+                <div className="output-header">
+                  <label>Calculation Log:</label>
+                </div>
+                <div
+                  className="log-display"
+                  dangerouslySetInnerHTML={{
+                    __html: filterLogByPlayer(log.logData, historyPlayerFilter).replace(/\n/g, '<br>')
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+          {getFilteredHistoryLogs().length === 0 && (
+            <div className="no-logs">No tournament logs found.</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <>
       <div className="app-container">
         <h1>VTTC Mon/Fri</h1>
-        
-        <div className="form-section">
-          <div className="input-group">
-            <label htmlFor="result">Result:</label>
-            <textarea
-              id="result"
-              value={result}
-              onChange={(e) => setResult(e.target.value)}
-              placeholder="Result will appear here..."
-              rows={20}
-            />
-          </div>
-
-          <div className="input-group">
-            <label htmlFor="playerList">Player List:</label>
-            <textarea
-              id="playerList"
-              value={playerList}
-              onChange={(e) => setPlayerList(e.target.value)}
-              placeholder="Enter player list..."
-              rows={20}
-            />
-          </div>
-
-          <button onClick={handleCalculate} className="calculate-btn">
-            Calculate
-          </button>
-
-          {updatedPlayerList && (
-            <div className="output-section">
-              <div className="output-header">
-                <label>Updated Player List:</label>
-                <button
-                  onClick={() => copyToClipboard(updatedPlayerList)}
-                  className="copy-btn"
-                  title="Copy to clipboard"
-                >
-                  📋 Copy
-                </button>
-              </div>
-              <textarea
-                value={updatedPlayerList}
-                readOnly
-                rows={20}
-                className="output-textarea"
-              />
-            </div>
-          )}
-
-          {calculationLog && (
-            <div className="output-section">
-              <div className="output-header">
-                <label>Calculation Log:</label>
-                <div className="log-controls">
-                  <select
-                    value={selectedPlayer}
-                    onChange={(e) => handlePlayerFilterChange(e.target.value)}
-                    className="player-filter-dropdown"
-                  >
-                    <option value="all">All Players</option>
-                    {playerNames.map(name => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={saveLogToFile}
-                    className="save-btn"
-                    title="Save log to file"
-                  >
-                    💾 Save Log
-                  </button>
-                </div>
-              </div>
-              <div
-                className="log-display"
-                dangerouslySetInnerHTML={{ __html: calculationLog.replace(/\n/g, '<br>') }}
-              />
-            </div>
-          )}
-        </div>
+        {currentPage === 'calculator' ? renderCalculatorPage() : renderHistoryPage()}
       </div>
     </>
   )
