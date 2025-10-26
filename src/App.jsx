@@ -26,6 +26,10 @@ function App() {
   const [result, setResult] = useState('')
   const [playerList, setPlayerList] = useState('')
   const [updatedPlayerList, setUpdatedPlayerList] = useState('')
+  const [calculationLog, setCalculationLog] = useState('')
+  const [fullCalculationLog, setFullCalculationLog] = useState('')
+  const [selectedPlayer, setSelectedPlayer] = useState('all')
+  const [playerNames, setPlayerNames] = useState([])
 
 
   // Function to parse a single match result line
@@ -202,7 +206,7 @@ function App() {
   }
 
   // Function to calculate new ratings based on match results
-  const calculateNewRatings = (players, matchResults) => {
+  const calculateNewRatings = (players, matchResults, logMessages = []) => {
     // Create a map of player ratings by name for quick lookup
     const playerRatings = new Map()
     players.forEach(player => {
@@ -263,17 +267,31 @@ function App() {
       const winnerNewBracket = getBracketFromRating(newWinnerRating)
       const loserNewBracket = getBracketFromRating(newLoserRating)
 
-      console.log(`Match: ${winnerName} (${winnerRating}) beat ${loserName} (${loserRating})`)
-      console.log(`Rating delta: ${d}, Index: ${index}, Winner +${winnerGain}, Loser -${loserLoss}`)
-      console.log(`New ratings: ${winnerName}: ${newWinnerRating}, ${loserName}: ${newLoserRating}`)
+      const matchLog = `Match: <span class="winner">${winnerName}</span> (<span class="rating">${winnerRating}</span>) beat <span class="loser">${loserName}</span> (<span class="rating">${loserRating}</span>)`
+      const deltaLog = `Rating delta: ${d}, Index: ${index}, <span class="winner">Winner +${winnerGain}</span>, <span class="loser">Loser -${Math.abs(loserLoss)}</span>`
+      const ratingsLog = `New ratings: <span class="winner">${winnerName}: <span class="rating">${newWinnerRating}</span></span>, <span class="loser">${loserName}: <span class="rating">${newLoserRating}</span></span>`
+      
+      console.log(matchLog.replace(/<[^>]*>/g, '')) // Console log without HTML
+      console.log(deltaLog.replace(/<[^>]*>/g, ''))
+      console.log(ratingsLog.replace(/<[^>]*>/g, ''))
+      
+      logMessages.push(matchLog)
+      logMessages.push(deltaLog)
+      logMessages.push(ratingsLog)
       
       // Log bracket changes if they occurred
       if (winnerOldBracket !== winnerNewBracket) {
-        console.log(`${winnerName} bracket change: ${winnerOldBracket} → ${winnerNewBracket}`)
+        const bracketLog = `<span class="bracket-change">${winnerName} bracket change: <span class="bracket">${winnerOldBracket}</span> → <span class="bracket">${winnerNewBracket}</span></span>`
+        console.log(bracketLog.replace(/<[^>]*>/g, ''))
+        logMessages.push(bracketLog)
       }
       if (loserOldBracket !== loserNewBracket) {
-        console.log(`${loserName} bracket change: ${loserOldBracket} → ${loserNewBracket}`)
+        const bracketLog = `<span class="bracket-change">${loserName} bracket change: <span class="bracket">${loserOldBracket}</span> → <span class="bracket">${loserNewBracket}</span></span>`
+        console.log(bracketLog.replace(/<[^>]*>/g, ''))
+        logMessages.push(bracketLog)
       }
+      
+      logMessages.push('') // Add empty line between matches
     })
 
     // Return updated player list with new ratings and brackets
@@ -315,6 +333,113 @@ function App() {
     }
   }
 
+  // Function to filter log by player
+  const filterLogByPlayer = (fullLog, playerName) => {
+    if (playerName === 'all') return fullLog
+    
+    const lines = fullLog.split('\n')
+    const filteredLines = []
+    let inRelevantMatch = false
+    let hasAddedMatches = false
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim()
+      
+      // Skip all empty lines completely
+      if (trimmedLine === '') continue
+      
+      // Always include header and summary sections
+      if (trimmedLine.includes('Tournament Calculation Log') ||
+          trimmedLine.includes('='.repeat(50))) {
+        filteredLines.push(trimmedLine)
+        continue
+      }
+      
+      // Processing line - add with spacing
+      if (trimmedLine.includes('Processing')) {
+        filteredLines.push('')
+        filteredLines.push(trimmedLine)
+        continue
+      }
+      
+      // Final Results section - add with spacing
+      if (trimmedLine.includes('Final Results:') || trimmedLine.includes('-'.repeat(30))) {
+        filteredLines.push('')
+        filteredLines.push(trimmedLine)
+        continue
+      }
+      
+      // Check if this is a match line
+      if (trimmedLine.startsWith('Match:')) {
+        inRelevantMatch = trimmedLine.includes(playerName)
+        if (inRelevantMatch) {
+          // Add spacing before match (except for the first match)
+          if (hasAddedMatches) {
+            filteredLines.push('')
+          }
+          // Highlight the selected player in match lines
+          const highlightedLine = trimmedLine.replace(
+            new RegExp(`(<span class="[^"]*">${playerName}</span>)`, 'g'),
+            '<span class="selected-player">$1</span>'
+          )
+          filteredLines.push(highlightedLine)
+          hasAddedMatches = true
+        }
+        continue
+      }
+      
+      // Include rating delta and new ratings lines if we're in a relevant match
+      if (inRelevantMatch && (trimmedLine.startsWith('Rating delta:') || trimmedLine.startsWith('New ratings:'))) {
+        // Highlight the selected player in rating lines
+        const highlightedLine = trimmedLine.replace(
+          new RegExp(`(<span class="[^"]*">${playerName}[^<]*</span>)`, 'g'),
+          '<span class="selected-player">$1</span>'
+        )
+        filteredLines.push(highlightedLine)
+        continue
+      }
+      
+      // Include bracket change lines for the selected player
+      if (trimmedLine.includes('bracket change:') && trimmedLine.includes(playerName)) {
+        filteredLines.push(trimmedLine)
+        continue
+      }
+      
+      // Include final results line for the selected player
+      if (trimmedLine.includes(`<span class="player-name">${playerName}</span>`)) {
+        // Highlight the selected player in final results
+        const highlightedLine = trimmedLine.replace(
+          new RegExp(`(<span class="player-name">${playerName}</span>)`, 'g'),
+          '<span class="selected-player">$1</span>'
+        )
+        filteredLines.push(highlightedLine)
+        continue
+      }
+    }
+    
+    return filteredLines.join('\n')
+  }
+
+  // Function to save log to file
+  const saveLogToFile = () => {
+    const blob = new Blob([calculationLog], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const playerSuffix = selectedPlayer !== 'all' ? `_${selectedPlayer.replace(/\s+/g, '_')}` : ''
+    a.href = url
+    a.download = `tournament_calculation_log${playerSuffix}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // Function to handle player filter change
+  const handlePlayerFilterChange = (playerName) => {
+    setSelectedPlayer(playerName)
+    setCalculationLog(filterLogByPlayer(fullCalculationLog, playerName))
+  }
+
   const handleCalculate = () => {
     const { results, errors: resultErrors } = parseAllResults(result)
     const { players, errors: playerErrors } = parseAllPlayers(playerList)
@@ -322,30 +447,68 @@ function App() {
     console.log('Parsed Results:', results)
     console.log('Parsed Players:', players)
     
+    const logMessages = []
+    logMessages.push(`Tournament Calculation Log - ${new Date().toLocaleString()}`)
+    logMessages.push('=' .repeat(50))
+    logMessages.push('')
+    
     if (resultErrors.length > 0) {
       console.log('Result Parsing Errors:', resultErrors)
+      logMessages.push('Result Parsing Errors:')
+      resultErrors.forEach(error => {
+        logMessages.push(`Line ${error.lineNumber}: ${error.error}`)
+      })
       setUpdatedPlayerList('')
+      setCalculationLog(logMessages.join('\n'))
       return
     }
     if (playerErrors.length > 0) {
       console.log('Player Parsing Errors:', playerErrors)
+      logMessages.push('Player Parsing Errors:')
+      playerErrors.forEach(error => {
+        logMessages.push(`Line ${error.lineNumber}: ${error.error}`)
+      })
       setUpdatedPlayerList('')
+      setCalculationLog(logMessages.join('\n'))
       return
     }
 
     if (results.length === 0 || players.length === 0) {
       console.log('No valid results or players to process')
+      logMessages.push('No valid results or players to process')
       setUpdatedPlayerList('')
+      setCalculationLog(logMessages.join('\n'))
       return
     }
 
+    logMessages.push(`Processing ${results.length} matches for ${players.length} players`)
+    logMessages.push('')
+
     // Calculate new ratings
-    const updatedPlayers = calculateNewRatings(players, results)
+    const updatedPlayers = calculateNewRatings(players, results, logMessages)
     console.log('Updated Player Ratings:', updatedPlayers)
+    
+    logMessages.push('Final Results:')
+    logMessages.push('-'.repeat(30))
+    updatedPlayers.forEach(player => {
+      const ratingChange = player.rating - player.oldRating
+      const ratingChangeStr = ratingChange >= 0 ? `+${ratingChange}` : `${ratingChange}`
+      const ratingChangeClass = ratingChange >= 0 ? 'rating-gain' : 'rating-loss'
+      const bracketChange = player.bracket !== player.oldBracket ? ` (<span class="bracket-change">Bracket: <span class="bracket">${player.oldBracket}</span> → <span class="bracket">${player.bracket}</span></span>)` : ''
+      logMessages.push(`<span class="player-name">${player.name}</span>: <span class="rating">${player.oldRating}</span> → <span class="rating">${player.rating}</span> (<span class="${ratingChangeClass}">${ratingChangeStr}</span>)${bracketChange}`)
+    })
     
     // Format and set the updated player list output
     const formattedOutput = formatUpdatedPlayerList(updatedPlayers)
     setUpdatedPlayerList(formattedOutput)
+    
+    // Store full log and player names for filtering
+    const fullLog = logMessages.join('\n')
+    setFullCalculationLog(fullLog)
+    setPlayerNames(players.map(p => p.name).sort())
+    
+    // Apply current filter
+    setCalculationLog(filterLogByPlayer(fullLog, selectedPlayer))
   }
 
   return (
@@ -397,6 +560,37 @@ function App() {
                 readOnly
                 rows={20}
                 className="output-textarea"
+              />
+            </div>
+          )}
+
+          {calculationLog && (
+            <div className="output-section">
+              <div className="output-header">
+                <label>Calculation Log:</label>
+                <div className="log-controls">
+                  <select
+                    value={selectedPlayer}
+                    onChange={(e) => handlePlayerFilterChange(e.target.value)}
+                    className="player-filter-dropdown"
+                  >
+                    <option value="all">All Players</option>
+                    {playerNames.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={saveLogToFile}
+                    className="save-btn"
+                    title="Save log to file"
+                  >
+                    💾 Save Log
+                  </button>
+                </div>
+              </div>
+              <div
+                className="log-display"
+                dangerouslySetInnerHTML={{ __html: calculationLog.replace(/\n/g, '<br>') }}
               />
             </div>
           )}
